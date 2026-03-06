@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leaflet Cluster - Luoghi della Cultura Napoli</title>
+
+<!-- Leaflet CSS -->
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+
+<!-- MarkerCluster CSS -->
+<link
+  rel="stylesheet"
+  href="https://leaflet.github.io/Leaflet.markercluster/dist/MarkerCluster.css"
+/>
+<link
+  rel="stylesheet"
+  href="https://leaflet.github.io/Leaflet.markercluster/dist/MarkerCluster.Default.css"
+/>
+
+<style>
+  #map { height: 100vh; width: 100%; }
+#sidebar {
+  width: 300px;
+  background: #ffffff;
+  padding: 15px;
+  overflow-y: auto;
+  border-right: 1px solid #ccc;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  font-family: Arial;
+}
+#sidebar h2, #sidebar h3 { font-family: Arial; margin-top: 10px; }
+#sidebar input {
+  border: 1px solid #bbb;
+  border-radius: 5px;
+}
+#sidebar label { font-size: 15px; }
+#sidebar ul li:hover { background:#eee; }
+</style>
+</head>
+
+<body>
+<div id="container" style="display:flex; height:100vh; width:100%;">
+  <div id="sidebar" style="width:300px; background:#f7f7f7; padding:15px; overflow-y:auto; border-right:1px solid #ccc;">
+    <h2>Ricerca Luoghi</h2>
+    <input id="searchBox" type="text" placeholder="Cerca per nome..." style="width:100%; padding:8px; margin-bottom:15px; border:1px solid #aaa; border-radius:5px;">
+
+    <h3>Filtra per Tipologia</h3>
+<button id="resetFilters" style="padding:6px 10px; margin-bottom:10px; width:100%; background:#0078ff; color:white; border:none; border-radius:5px; cursor:pointer;">Azzera Filtri</button>
+    <div id="filters"></div>
+
+    <h3>Risultati</h3>
+    <ul id="results" style="list-style:none; padding:0;"></ul>
+  </div>
+  <div id="map" style="flex:1;"></div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- MarkerCluster JS -->
+<script src="https://leaflet.github.io/Leaflet.markercluster/dist/leaflet.markercluster-src.js"></script>
+
+<!-- jQuery per getJSON -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<script>
+// 1) Inizializzazione mappa
+var map = L.map('map').setView([40.85, 14.27], 12);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// 2) Dichiarazione del gruppo cluster
+var markers = L.markerClusterGroup();
+var allFeatures = [];
+var tipologieSet = new Set();
+
+// 3) Caricamento GeoJSON
+$.getJSON('./luoghi_cultura_napoli.geojson', function (data) {
+    L.geoJson(data, {
+        pointToLayer: function (feature, latlng) {
+
+            // Foto se presente
+            var fotografia = "";
+            if (feature.properties.imageUrl) {
+                fotografia = '<img style="width:100%; height:100%;" src="' + feature.properties.imageUrl + '" />';
+            }
+
+            // Icona personalizzata in base alla tipologia
+            var customIcon = L.icon({
+                iconUrl: 'icons/' + feature.properties.tipologia + '.png',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            });
+
+            // Creazione marker
+            var marker = L.marker(latlng, { icon: customIcon });
+
+            // Popup
+            marker.bindPopup(
+                '<h3>' + feature.properties.nome + '</h3>' +
+                '<p><b>Tipologia:</b> ' + feature.properties.tipologia + '</p>' +
+                fotografia
+            );
+
+            // Aggiungo il marker al gruppo cluster
+            tipologieSet.add(feature.properties.tipologia);
+            allFeatures.push({
+                name: feature.properties.nome,
+                tipologia: feature.properties.tipologia,
+                layer: marker,
+                feature: feature
+            });
+            markers.addLayer(marker);
+        }
+    });
+
+    // Aggiungo il gruppo cluster alla mappa
+    map.addLayer(markers);
+
+    // --- Generazione Filtri Tipologia ---
+    var filtersDiv = document.getElementById('filters');
+    tipologieSet.forEach(function(tip) {
+        var id = 'filter_' + tip;
+        var wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <label>
+                <input type="checkbox" class="tipofilter" id="${id}" value="${tip}" checked>
+                ${tip}
+            </label>`;
+        filtersDiv.appendChild(wrapper);
+    });
+
+    function applyFilters() {
+        var checked = Array.from(document.querySelectorAll('.tipofilter:checked')).map(c => c.value);
+        markers.clearLayers();
+        allFeatures.forEach(f => {
+            if (checked.includes(f.tipologia)) {
+                markers.addLayer(f.layer);
+            }
+        });
+    }
+
+    document.querySelectorAll('.tipofilter').forEach(cb => {
+        cb.addEventListener('change', applyFilters);
+    });
+
+    // --- Pulsante Reset Filtri ---
+    document.getElementById('resetFilters').addEventListener('click', function() {
+        document.querySelectorAll('.tipofilter').forEach(cb => cb.checked = true);
+        applyFilters();
+    });
+
+    // --- Ricerca ---
+    var searchBox = document.getElementById('searchBox');
+    var resultsList = document.getElementById('results');
+
+    searchBox.addEventListener('input', function() {
+        var query = this.value.toLowerCase();
+        resultsList.innerHTML = '';
+        if (query.length === 0) return;
+        var filtered = allFeatures.filter(f => f.name.toLowerCase().includes(query));
+
+        filtered.forEach(f => {
+            var li = document.createElement('li');
+            li.textContent = f.name;
+            li.style.padding = '6px 4px';
+            li.style.cursor = 'pointer';
+            li.addEventListener('click', function() {
+                map.setView(f.layer.getLatLng(), 18);
+                f.layer.openPopup();
+            });
+            resultsList.appendChild(li);
+        });
+    });
+});
+</script>
+
+</body>
+</html>
